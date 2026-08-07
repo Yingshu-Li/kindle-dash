@@ -1,0 +1,37 @@
+# 周课表（教师视角）
+#
+# 南通高等师范学校附属小学 · 冯佳祺 · 2025-2026 学年度第一学期
+#
+# weekday: 1=周一 ... 5=周五
+# period:  第几节（1-6）。连堂写 periods: [4, 5]
+# class:   班级 —— 格子里最显眼的一行。教师最需要知道的是「去哪个班」，
+#          科目基本固定，所以班级才是主体信息。
+# room:    需要换教室时才填（比如美术室），留空则不显示
+#
+# 节次时间在 config.yaml 的 schedule.periods 里定义。
+# 临时调课不要改这里，用 overrides.yaml。
+
+courses:
+  # ---- 周一 ----
+  - {weekday: 1, period: 4, class: "四6班"}
+  - {weekday: 1, period: 5, class: "二8班"}
+
+  # ---- 周二 ----
+  - {weekday: 2, period: 2, class: "一3班"}
+  - {weekday: 2, period: 4, class: "二2班"}
+  - {weekday: 2, period: 5, class: "一1班"}
+
+  # ---- 周三 ----
+  - {weekday: 3, period: 2, class: "二6班"}
+  - {weekday: 3, period: 4, class: "一2班"}
+  - {weekday: 3, period: 5, class: "一3班"}
+
+  # ---- 周四 ----
+  - {weekday: 4, period: 5, class: "一1班"}
+  - {weekday: 4, period: 6, class: "四6班"}
+
+  # ---- 周五 ----
+  - {weekday: 5, period: 2, class: "二2班"}
+  - {weekday: 5, period: 3, class: "二8班"}
+  - {weekday: 5, period: 5, class: "一2班"}
+  - {weekday: 5, period: 6, class: "二6班"}

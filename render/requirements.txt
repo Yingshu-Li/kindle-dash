@@ -1,0 +1,5 @@
+Pillow>=10.0
+PyYAML>=6.0
+requests>=2.31
+# Windows 没有系统级 IANA 时区库，zoneinfo 依赖此包；Linux 上冗余但无害
+tzdata>=2024.1

@@ -1,0 +1,14 @@
+# 渲染产物走独立的私有输出仓库，不进代码仓库
+out/
+
+__pycache__/
+*.pyc
+.venv/
+
+# 任何含凭据的文件都绝不能进仓库。
+# 设备端的 net.conf 里有只读 token，Lark 的 app_secret 走环境变量。
+net.conf
+device-config
+*.token
+*.secret
+.env

@@ -1,0 +1,36 @@
+# 临时调整（仅 provider: yaml 时使用；用 Lark 时以「临时调整」表为准）
+#
+# 只影响指定日期，不动 schedule.yaml 里的常规课表。
+# 三种 action，屏幕上各有对应的汉字角标：
+#
+#   cancel  停课  格子保留原班级但用灰色划掉，角标「停」
+#                 —— 不清空是有意的：「今天不用去」和「本来是哪个班」
+#                    都是有用信息，空格子会把后者丢掉
+#   add     加课  空格填上新班级，角标「加」
+#   move    换班  原格改成新班级，角标「换」
+#
+# match 按 period 定位，可加 name/class 进一步限定。
+# class 和 name 是同义词，写哪个都行。
+
+overrides: []
+
+# 示例（取消注释即可生效）：
+#
+# overrides:
+#   - date: "2026-09-15"
+#     action: cancel
+#     match:
+#       period: 5
+#
+#   - date: "2026-09-16"
+#     action: add
+#     course:
+#       periods: [3]
+#       class: "三2班"
+#
+#   - date: "2026-09-17"
+#     action: move
+#     match:
+#       period: 6
+#     to:
+#       class: "五1班"

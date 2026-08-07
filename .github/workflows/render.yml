@@ -1,0 +1,107 @@
+name: Render dashboard
+
+# 时间是 UTC。北京时间 = UTC+8。
+# "*/15 22-23,0-16 * * *" 对应北京 06:00–00:59 每 15 分钟一次。
+# 凌晨不跑 —— 那几个小时没人看。
+#
+# 本仓库是公开的（里面只有代码和字体，零个人信息），所以 Actions 免费无限，
+# 不必为额度压缩频率。课表和待办这些内容渲染后推到另一个私有仓库，不公开。
+on:
+  schedule:
+    - cron: "*/15 22-23,0-16 * * *"
+  push:
+    paths:
+      - "render/**"
+      - "data/**"
+      - "assets/**"
+      - ".github/workflows/render.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: render-dashboard
+  cancel-in-progress: true    # 排队的旧任务没有意义，直接取消
+
+jobs:
+  render:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: render/requirements.txt
+
+      - name: 安装依赖
+        run: pip install -r render/requirements.txt
+
+      - name: 渲染
+        env:
+          LARK_APP_ID: ${{ secrets.LARK_APP_ID }}
+          LARK_APP_SECRET: ${{ secrets.LARK_APP_SECRET }}
+        run: python render/render.py --out out
+
+      - name: 校验时钟区留白
+        # 防呆：万一有人误开了 --preview-clock，图里会烤进一个静态时间，
+        # 和设备每分钟重绘的时钟叠在一起。这个错误踩过一次。
+        run: |
+          python - <<'PY'
+          import json, sys
+          from PIL import Image
+          hm = json.load(open('out/hitmap.json', encoding='utf-8'))
+          c, off = hm['clock'], hm['top_offset']
+          x1, y1 = c['left'], c['top'] - off
+          box = Image.open('out/dash.png').crop(
+              (x1, y1, x1 + c['cls']['width'], y1 + c['cls']['height']))
+          dark = sum(box.histogram()[:128])
+          print('时钟区暗像素 =', dark)
+          sys.exit(1 if dark > 200 else 0)
+          PY
+
+      - name: 推送到私有输出仓库
+        env:
+          OUT_TOKEN: ${{ secrets.OUT_REPO_TOKEN }}
+          OUT_REPO: ${{ secrets.OUT_REPO }}
+        run: |
+          set -euo pipefail
+          if [ -z "${OUT_TOKEN:-}" ] || [ -z "${OUT_REPO:-}" ]; then
+            echo "未配置 OUT_REPO / OUT_REPO_TOKEN，跳过推送"
+            exit 0
+          fi
+
+          REMOTE="https://x-access-token:${OUT_TOKEN}@github.com/${OUT_REPO}.git"
+
+          # 先比对内容：没变就不推。设备是按哈希判断要不要重绘的，
+          # 推一个内容相同的新 commit 只会白白产生一次 git 操作。
+          NEW=$(cat out/dash.png out/device.conf | sha256sum | cut -d' ' -f1)
+          OLD=none
+          if git ls-remote --exit-code "$REMOTE" main >/dev/null 2>&1; then
+            TMP0=$(mktemp -d)
+            git clone -q --depth 1 "$REMOTE" "$TMP0" 2>/dev/null || true
+            if [ -f "$TMP0/dash.png" ] && [ -f "$TMP0/device.conf" ]; then
+              OLD=$(cat "$TMP0/dash.png" "$TMP0/device.conf" | sha256sum | cut -d' ' -f1)
+            fi
+          fi
+          if [ "$NEW" = "$OLD" ]; then
+            echo "内容未变，跳过推送"
+            exit 0
+          fi
+
+          # 用一次性工作目录重建单 commit 历史再强推 ——
+          # 输出仓库永远只有一个 commit，不会随时间膨胀。
+          TMP=$(mktemp -d)
+          cp out/dash.png out/device.conf out/device-font.ttf out/hitmap.json "$TMP/"
+          cd "$TMP"
+          git init -q
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -q -m "render $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          git push -q --force "$REMOTE" HEAD:main
+          echo "已推送到 $OUT_REPO"

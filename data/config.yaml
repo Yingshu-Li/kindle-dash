@@ -1,0 +1,187 @@
+# Dashboard 全局配置
+# 改完推到 GitHub，下一个渲染周期生效
+
+data_source:
+  # lark  —— 课表/调课/待办都来自多维表格（手机上改，推荐）
+  # yaml  —— 来自本仓库的 data/*.yaml，待办来自 GitHub Issues
+  #
+  # 注意：本地渲染需要环境变量 LARK_APP_ID / LARK_APP_SECRET；
+  # 加 --stub 参数会强制走 yaml 数据源，用于不联网调版面。
+  provider: lark
+
+lark:
+  # Lark 与飞书是两套独立租户，数据不互通，但 API 完全一致。
+  # 只需改这一行即可切换；切换后需要在新租户里重建表格。
+  #   Lark  https://open.larksuite.com
+  #   飞书  https://open.feishu.cn
+  base_url: https://open.larksuite.com
+
+  # 多维表格 Base 的 app_token。从表格链接里取：
+  #   https://xxx.larksuite.com/base/<app_token>?table=<table_id>
+  #
+  # 注意：若表格建在【知识库】里，链接会是 /wiki/<node_token> 形式，
+  # 那是节点 token 而非 app_token，两者不通用。要么用 lark.resolve_app_token()
+  # 换取，要么把表格移到「我的空间」让链接变成 /base/ 形式（更省事）。
+  app_token: ""      # 公开仓库里留空，实际值由环境变量 LARK_APP_TOKEN 提供
+
+  tables:
+    schedule: "tbltNJ6fzSlPjBlP"    # 课程表（网格）
+    overrides: "tblHID6xTxAGaZuu"   # 临时调整
+    todo: "tbleIQ00Cpvrt0dC"        # 待办
+
+  # 临时调整的自动清理：日期早于「今天减这么多天」的行会被自动删除。
+  # 一次性的调整不该要求人事后手动打扫。留几天缓冲是为了避开时区边界，
+  # 也方便回头查最近改过什么。设为 0 或负数可关闭自动清理。
+  overrides_cleanup_days: 3
+
+  # 列名映射。表格里改了列名就改这里，不用动代码。
+  fields:
+    # 课程表做成网格：一行一个节次，一列一个星期，格子里填班级。
+    # 和屏幕上的布局一一对应，改课就是找到那一格改内容。
+    schedule:
+      period: 节次
+      # 作息时间。表格里填了就以表格为准，留空则回落到下面 schedule.periods
+      # 里的默认值 —— 这样手机上就能改作息，不必动代码仓库。
+      # 格式 08:00-08:40，全角符号、~、至 都能识别
+      time: 时间
+      weekdays:
+        周一: 1
+        周二: 2
+        周三: 3
+        周四: 4
+        周五: 5
+    # 临时调整只需四个字段：星期由日期推出，原班级由网格查出，都不必重复填
+    overrides:
+      date: 日期        # 日期列
+      period: 节次      # 第几节
+      action: 操作      # 单选 停课 / 加课 / 换班
+      class: 班级       # 加课和换班时填；停课可留空
+      note: 备注
+    todo:
+      title: 事项
+      done: 完成        # 复选框，勾上就从屏幕消失
+      due: 截止         # 日期列
+      priority: 优先    # 复选框
+      tags: 标签        # 文本，空格分隔
+
+screen:
+  width: 600
+  # 整屏 800，不再给原生状态栏留位置。
+  #
+  # 早先留出顶部 32px，是因为原生状态栏活着并会不断重绘那块区域。
+  # 改成冻结 cvm 之后它不会再重绘了，那 32px 就变成负资产 ——
+  # 上面显示的是冻结瞬间的时间和电量，永远不动，紧挨着我们正确的大时钟
+  # 反而制造困惑。所以收回整屏自用，电量改由设备自己读 lipc 绘制。
+  height: 800
+  top_offset: 0
+  # 设备屏幕是 8 位灰度（Y8），渲染最终会 convert("L")
+
+locale:
+  timezone: Asia/Shanghai
+  # 星期显示用的名称，索引 0 = 周一
+  weekday_names: ["周一", "周二", "周三", "周四", "周五", "周六", "周日"]
+
+weather:
+  enabled: true
+  # Open-Meteo 免 key。填你所在城市的经纬度。
+  # 查询方法：https://geocoding-api.open-meteo.com/v1/search?name=城市名
+  # 南通（课表抬头是南通高等师范学校附属小学）。
+  # 换城市查这里取经纬度：
+  #   https://geocoding-api.open-meteo.com/v1/search?name=城市名
+  latitude: 31.9800
+  longitude: 120.8940
+  location_name: "南通"
+
+todo:
+  # 待办来源：GitHub Issues（本仓库的 open issues）
+  max_items: 10
+  # 标题里以 due:YYYY-MM-DD 开头的会被解析成截止日并优先排序
+  due_prefix: "due:"
+  # 这些 label 的条目排在前面
+  priority_labels: ["urgent", "重要"]
+
+schedule:
+  # 周课表网格：显示周一到周五
+  weekdays: [1, 2, 3, 4, 5]
+
+  # 教师视角：科目基本固定，在页脚标一次即可，不必在每个格子里重复。
+  # 格子里显示的是班级。
+  subject_label: "艺术（美）"
+  teacher_label: "冯佳祺"
+
+  # 节次时间表。这些时间用于：
+  #   1. 网格左侧显示每节课的起止
+  #   2. 判断"当前是第几节""下一节是什么"
+  # group 决定视觉分组：morning / afternoon / extra
+  # extra 组（晚上那两节）会用浅灰底区分开
+  #
+  # 作息：每节 40 分钟。课表原件上是第 1-6 节，上午 3 节、下午 3 节。
+  # 若还需要显示课后服务时段，在末尾追加 group: extra 的两节即可，
+  # 网格会自动多出两行并用浅灰底区分。
+  #
+  # 注意：字段名用 idx 而不是 no —— YAML 1.1 里 no/yes/on/off 是布尔字面量，
+  # 写成 {no: 1} 的话键会被解析成布尔 False，排查起来很费时间。
+  #
+  # ↓↓↓ 下面是按常见作息推算的占位时间，请替换成实际的 ↓↓↓
+  periods:
+    - {idx: 1, start: "08:00", end: "08:40", group: morning}
+    - {idx: 2, start: "08:50", end: "09:30", group: morning}
+    - {idx: 3, start: "09:50", end: "10:30", group: morning}
+    - {idx: 4, start: "13:30", end: "14:10", group: afternoon}
+    - {idx: 5, start: "14:20", end: "15:00", group: afternoon}
+    - {idx: 6, start: "15:10", end: "15:50", group: afternoon}
+    # 课后服务两节。课表原件上没有它们，所以数据里暂时是空的 ——
+    # 有安排时在 schedule.yaml 里按 period: 7 / 8 填即可。
+    - {idx: 7, start: "16:00", end: "16:40", group: extra}
+    - {idx: 8, start: "16:50", end: "17:30", group: extra}
+
+  # 距下一节课开始不足这么多分钟时，在页眉提示"下一节"
+  next_lookahead_minutes: 180
+
+  # 是否在格子里显示教室。小学固定教室上课，关掉能让科目名用更大字号。
+  # 需要时改成 true，数据里填了 room 的科目就会显示地点。
+  show_room: false
+
+fonts:
+  # 字体随仓库分发，保证本地预览与 CI 产出像素级一致。
+  # 用可变字体：一个文件覆盖全部字重。
+  # 注意其字重轴默认值是 100(Thin)，渲染器会强制设定下面两个值 ——
+  # 若不设定，墨水屏上字形会细到看不清。
+  file: assets/fonts/NotoSansSC-VF.ttf
+  weight_regular: 400
+  weight_bold: 700
+  # 以下仅在可变字体缺失时作为回落（本地开发用系统字体）
+  regular: ""
+  bold: ""
+
+layout:
+  margin_x: 20
+
+  # 页眉：左半留给设备画的大时钟，右半放日期/天气/下一节课
+  header_height: 100
+  # 顶部留给设备本地绘制时钟的区域（渲染时留白，设备每分钟在此局部重绘）。
+  # 坐标是内容区内部坐标，设备端会自动加上 top_offset。
+  clock_rect: [20, 6, 296, 92]   # x1, y1, x2, y2
+
+  # 「当前/下一节课」也交给设备每分钟重算重绘。
+  # 原因：这行内容依赖当前时刻，而图片半小时才重渲染一次，
+  # 一节课才 40 分钟 —— 留在图里的话大半节课都是错的。
+  next_rect: [310, 58, 580, 90]
+
+  # 周课表网格
+  grid_top: 108
+  # 左侧节次标签列宽。要放下「节次号 + 起止两行时间」，38px 会把时间挤掉
+  grid_label_w: 50
+  grid_header_h: 26     # 星期表头行高
+  # 每节课的行高。8 行（含课后服务两节）时用 40 ——
+  # 班级名 22px 在 40px 行里仍然舒展，同时给待办区留够 8 条的空间
+  grid_row_h: 40
+
+  # 待办区从网格下方开始。收回顶部 32px 后这里多了空间，能多放一条待办。
+  todo_gap: 14
+  todo_bottom: 750
+  footer_top: 758
+
+  # 「返回主页」按钮。dashboard 运行时会冻结 Kindle 界面，
+  # 触摸屏幕不再有任何反应 —— 只有点这个按钮才解冻退出。
+  exit_rect: [452, 760, 580, 794]
