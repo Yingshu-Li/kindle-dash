@@ -90,11 +90,23 @@ jobs:
           OLD=none
           if git ls-remote --exit-code "$REMOTE" main >/dev/null 2>&1; then
             TMP0=$(mktemp -d)
-            git clone -q --depth 1 "$REMOTE" "$TMP0" 2>/dev/null || true
-            if [ -f "$TMP0/dash.png" ] && [ -f "$TMP0/device.conf" ]; then
-              OLD=$(sig "$TMP0/dash.png" "$TMP0/device.conf" | sha256sum | cut -d' ' -f1)
+            if git clone -q --depth 1 "$REMOTE" "$TMP0" 2>/dev/null; then
+              echo "已取回远端产物用于比对"
+              if [ -f "$TMP0/dash.png" ] && [ -f "$TMP0/device.conf" ]; then
+                OLD=$(sig "$TMP0/dash.png" "$TMP0/device.conf" | sha256sum | cut -d' ' -f1)
+                # 分别比对，便于定位到底是图变了还是配置变了
+                echo "  图  新=$(sha256sum out/dash.png | cut -c1-12) 旧=$(sha256sum "$TMP0/dash.png" | cut -c1-12)"
+                echo "  配置 新=$(grep -v '^GENERATED_AT=' out/device.conf | sha256sum | cut -c1-12) 旧=$(grep -v '^GENERATED_AT=' "$TMP0/device.conf" | sha256sum | cut -c1-12)"
+              else
+                echo "远端缺少 dash.png / device.conf，视为首次推送"
+              fi
+            else
+              echo "clone 失败，无法比对，按有变化处理"
             fi
+          else
+            echo "远端 main 分支不存在，首次推送"
           fi
+          echo "签名  新=${NEW:0:16}  旧=${OLD:0:16}"
           if [ "$NEW" = "$OLD" ]; then
             echo "内容未变，跳过推送"
             exit 0
