@@ -49,21 +49,26 @@ jobs:
           LARK_APP_TOKEN: ${{ secrets.LARK_APP_TOKEN }}
         run: python render/render.py --out out
 
-      - name: 校验时钟区留白
-        # 防呆：万一有人误开了 --preview-clock，图里会烤进一个静态时间，
-        # 和设备每分钟重绘的时钟叠在一起。这个错误踩过一次。
+      - name: 校验设备绘制区留白
+        # 四块区域都由设备实时重绘，图里必须是白的。有内容的话，设备的 -k
+        # 会把它擦掉（留下缺角），或者两者叠在一起 —— 时钟那次就是叠出了
+        # 两个时间。调版面最容易在这里出错，所以逐块校验。
+        # 这段与 deploy.ps1 里的校验是同一套逻辑，本地和 CI 都拦得住。
         run: |
           python - <<'PY'
           import json, sys
           from PIL import Image
           hm = json.load(open('out/hitmap.json', encoding='utf-8'))
-          c, off = hm['clock'], hm['top_offset']
-          x1, y1 = c['left'], c['top'] - off
-          box = Image.open('out/dash.png').crop(
-              (x1, y1, x1 + c['cls']['width'], y1 + c['cls']['height']))
-          dark = sum(box.histogram()[:128])
-          print('时钟区暗像素 =', dark)
-          sys.exit(1 if dark > 200 else 0)
+          img = Image.open('out/dash.png')
+          bad = 0
+          for key in ('clock', 'next', 'status', 'sync'):
+              c = hm[key]['cls']
+              x1, y1 = c['left'], c['top'] - hm['top_offset']
+              dark = sum(img.crop(
+                  (x1, y1, x1 + c['width'], y1 + c['height'])).histogram()[:128])
+              print(f'{key:7s} 暗像素 = {dark}' + ('  <<< 有内容' if dark > 200 else ''))
+              bad += dark > 200
+          sys.exit(1 if bad else 0)
           PY
 
       - name: 推送到私有输出仓库
