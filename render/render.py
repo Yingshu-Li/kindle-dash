@@ -18,7 +18,7 @@ import argparse
 import json
 import os
 import sys
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -188,11 +188,25 @@ def draw_header(draw, fonts, cfg, now, weather, hitmap,
                   font=fonts.get(hitmap["clock"]["px"], bold=True), fill=BLACK)
         draw.rectangle([cx1, cy1, cx2, cy2], outline=GRAY_LIGHT, width=1)
 
+    # 电量放右上角，由设备每分钟重绘。字号比原来在页脚时大得多 ——
+    # 它是需要瞟一眼就看到的信息，藏在页脚小字里没有意义。
+    sx1, sy1, sx2, sy2 = lay["status_rect"]
+    hitmap["status"] = {
+        "top": sy1 + top_off,
+        "left": sx1,
+        "right": W - sx2,
+        "bottom": PH - (sy2 + top_off),
+        "px": int((sy2 - sy1) * 0.62),
+        "cls": {"top": sy1 + top_off, "left": sx1,
+                "width": sx2 - sx1, "height": sy2 - sy1},
+    }
+
     right_x = cx2 + 14
     names = cfg["locale"]["weekday_names"]
     weekday = names[now.isoweekday() - 1]
 
-    f_date = fonts.get(24, bold=True)
+    # 字号 22 而不是 24：右侧要给电量区留出空间，不能顶到它
+    f_date = fonts.get(22, bold=True)
     f_sub = fonts.get(15)
     f_next = fonts.get(15, bold=True)
 
@@ -253,7 +267,7 @@ def wrap_text(draw, s: str, font, max_w: int, max_lines: int) -> list[str]:
     return lines
 
 
-def draw_week_grid(draw, fonts, cfg, week, today_wd, cur_period) -> int:
+def draw_week_grid(draw, fonts, cfg, week, today_wd, cur_period, today) -> int:
     """画周一到周五 × 8 节的课表网格，返回本区域结束的 y。
 
     连排的课合并成一个格子；晚上那两节（extra 组）用浅灰底与白天区分；
@@ -296,16 +310,27 @@ def draw_week_grid(draw, fonts, cfg, week, today_wd, cur_period) -> int:
             y = body_top + i * row_h
             draw.rectangle([mx, y, grid_right, y + row_h], fill=GRAY_BG)
 
-    # ---- 星期表头 ----
+    # ---- 星期表头：星期几 + 当天日期 ----
+    # 加日期是为了让「本周」有明确的锚点 —— 只写星期几的话，
+    # 看到「周五停课」你还得回头算一下那是几号。
+    f_date = fonts.get(11)
+    monday = today - timedelta(days=today.isoweekday() - 1)
     for j, wd in enumerate(weekdays):
         x = grid_x + j * col_w
         is_today = wd == today_wd
         if is_today:
             draw.rectangle([x, top, x + col_w, top + head_h], fill=BLACK)
+        fg = WHITE if is_today else BLACK
+
         label = names[wd - 1]
         tw = text_width(draw, label, f_head)
-        draw.text((x + (col_w - tw) // 2, top + 4), label, font=f_head,
-                  fill=WHITE if is_today else BLACK)
+        draw.text((x + (col_w - tw) // 2, top + 2), label, font=f_head, fill=fg)
+
+        d = monday + timedelta(days=wd - 1)
+        dlabel = f"{d.month}/{d.day}"
+        tw = text_width(draw, dlabel, f_date)
+        draw.text((x + (col_w - tw) // 2, top + 21), dlabel, font=f_date,
+                  fill=fg if is_today else GRAY_DARK)
 
     # ---- 节次标签列：节次号 + 起止时间 ----
     # 教师需要知道这节课几点下课，所以起止都显示。
@@ -499,14 +524,18 @@ def draw_todos(draw, fonts, cfg, todos, today, hitmap, top):
         due_w = 0
         if t.due:
             days = (t.due - today).days
+            # 近的用相对说法（更直觉），远的直接给日期 ——
+            # 「12天」要心算才知道是哪天，「8/19」一眼就能对上日历
             if days < 0:
                 label = "已逾期"
             elif days == 0:
                 label = "今天"
             elif days == 1:
                 label = "明天"
+            elif days <= 6:
+                label = f"{days}天后"
             else:
-                label = f"{days}天"
+                label = f"{t.due.month}/{t.due.day}"
             due_w = text_width(draw, label, f_due) + 10
             overdue = days <= 0
             bx1 = 600 - mx - due_w
@@ -540,22 +569,14 @@ def draw_footer(draw, fonts, cfg, now, hitmap):
     mx = lay["margin_x"]
     top = lay["footer_top"]
 
-    # 科目和教师名在页脚标一次即可 —— 教师视角下科目基本固定，
-    # 在每个格子里重复它是浪费版面，班级才是要看的信息。
+    # 页脚只放按钮。
     #
-    # 这里【刻意不画渲染时间戳】。画上去的话图片每次渲染都不一样，
-    # 「内容没变就不重绘」的判断会永远为真：设备每 15 分钟做一次
-    # 整屏刷新，输出仓库每 15 分钟多一个 commit —— 防抖动机制被
-    # 一个时间戳完全架空。
-    # 数据是否新鲜由设备端判断并显示（断了会标「离线 N 分钟」），
-    # 那也比「云端何时渲染」更贴近你真正关心的问题。
-    sch = cfg["schedule"]
-    tags = [t for t in (sch.get("subject_label"), sch.get("teacher_label")) if t]
-    if tags:
-        draw.text((mx, top + 12), "  ·  ".join(tags),
-                  font=fonts.get(14, bold=True), fill=BLACK)
-
-    # 底部按钮。界面被冻结后触摸全屏无反应，只有点中这些矩形才有动作，
+    # 科目和教师名去掉了 —— 这是你自己的课表，不需要每天提醒你教什么、你是谁。
+    # 渲染时间戳也刻意不画：画上去的话图片每次渲染都不一样，
+    # 「内容没变就不重绘」会永远为真，设备每个周期都做一次无谓的整屏刷新。
+    # 数据是否新鲜由设备判断 —— 断了会在右上角标「离线 N 分钟」。
+    #
+    # 底部按钮：界面被冻结后触摸全屏无反应，只有点中这些矩形才有动作，
     # 所以它们必须画得足够显眼、够大、边界清楚。
     top_off = int(cfg["screen"].get("top_offset", 0))
     f_btn = fonts.get(15, bold=True)
@@ -572,26 +593,7 @@ def draw_footer(draw, fonts, cfg, now, hitmap):
     # 「→」和「←」是基本箭头，覆盖率高得多。
     hitmap["update"] = button("update_rect", "↓ 更新")
     hitmap["exit"] = button("exit_rect", "← 返回")
-
-    # 电量/离线提示区，由设备每分钟重绘 —— 冻结 cvm 后原生状态栏的电量
-    # 也跟着凝固了，所以必须我们自己读 lipc 画。
-    # 右边界要避开返回主页按钮，否则两者会叠在一起。
-    top_off = int(cfg["screen"].get("top_offset", 0))
-    W = cfg["screen"]["width"]
-    PH = cfg["screen"]["height"] + top_off
-    # 右边界要避开「更新」按钮，否则电量文字会和按钮叠在一起
-    ux1 = lay["update_rect"][0]
-    sx1, sy1 = 262, top + 6
-    sx2, sy2 = ux1 - 10, top + 30
-    hitmap["status"] = {
-        "top": sy1 + top_off,
-        "left": sx1,
-        "right": W - sx2,
-        "bottom": PH - (sy2 + top_off),
-        "px": 16,
-        "cls": {"top": sy1 + top_off, "left": sx1,
-                "width": sx2 - sx1, "height": sy2 - sy1},
-    }
+    # 电量/离线提示已移到右上角，在 draw_header 里登记坐标
 
 
 # ---------------------------------------------------------------- 下发给设备
@@ -820,7 +822,7 @@ def build(cfg, schedule_cfg, overrides_cfg, now, todos, weather, preview_clock=F
 
     draw_header(draw, fonts, cfg, now, weather, hitmap,
                 next_period, next_course, preview_clock)
-    grid_end = draw_week_grid(draw, fonts, cfg, week, today_wd, cur_period)
+    grid_end = draw_week_grid(draw, fonts, cfg, week, today_wd, cur_period, today)
     draw_todos(draw, fonts, cfg, todos, today, hitmap,
                grid_end + cfg["layout"]["todo_gap"])
     draw_footer(draw, fonts, cfg, now, hitmap)

@@ -13,7 +13,7 @@ Lark 与飞书是两套独立租户，数据不互通，但 API 完全一致 —
 from __future__ import annotations
 
 import os
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
 import requests
 
@@ -66,12 +66,26 @@ def as_bool(value) -> bool:
     return plain(value).lower() in ("true", "1", "yes", "是", "✓")
 
 
-def as_date(value, tz) -> date | None:
-    """日期列返回的是毫秒级 Unix 时间戳；也兼容手填的 YYYY-MM-DD 文本。"""
+def as_date(value, tz=None) -> date | None:
+    """日期列还原成日历上的那一天。
+
+    Lark 把日期存成【填写者所在时区的当天零点】的毫秒时间戳。实测：
+    在悉尼(+10)选「8月7日」存的是 2026-08-06 14:00 UTC。
+
+    这类字段表示的是日历上的一天，不该做时区换算 —— 按 Asia/Shanghai(+8)
+    去解读上面那个值会得到 8月6日，日期整整退回一天，于是「周五停课」
+    变成了「周四停课」。而按填写者时区解读又要求我们知道那个时区是什么，
+    并且填写者换个地方填就会变。
+
+    所以改用与时区无关的还原方式：加 12 小时后取 UTC 日期。
+    任何 UTC-11 到 UTC+11 之间的零点，加 12 小时后都会落在正确的那一天里。
+    （tz 参数保留是为了兼容旧调用，实际不再使用。）
+    """
     if value is None or value == "":
         return None
     if isinstance(value, (int, float)):
-        return datetime.fromtimestamp(value / 1000, tz=timezone.utc).astimezone(tz).date()
+        u = datetime.fromtimestamp(value / 1000, tz=timezone.utc)
+        return (u + timedelta(hours=12)).date()
     s = plain(value)
     if not s:
         return None
