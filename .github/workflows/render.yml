@@ -79,15 +79,20 @@ jobs:
 
           REMOTE="https://x-access-token:${OUT_TOKEN}@github.com/${OUT_REPO}.git"
 
-          # 先比对内容：没变就不推。设备是按哈希判断要不要重绘的，
-          # 推一个内容相同的新 commit 只会白白产生一次 git 操作。
-          NEW=$(cat out/dash.png out/device.conf | sha256sum | cut -d' ' -f1)
+          # 先比对内容：没变就不推。
+          #
+          # 比对时必须排除 device.conf 里的 GENERATED_AT —— 它每次渲染都变，
+          # 不排除的话这个判断永远为真，输出仓库每 15 分钟多一个 commit，
+          # 设备也会每个周期做一次无谓的整屏刷新（墨水屏上肉眼可见）。
+          # 同理，渲染出的图里也刻意不含任何时间戳。
+          sig() { cat "$1"; grep -v '^GENERATED_AT=' "$2"; }
+          NEW=$(sig out/dash.png out/device.conf | sha256sum | cut -d' ' -f1)
           OLD=none
           if git ls-remote --exit-code "$REMOTE" main >/dev/null 2>&1; then
             TMP0=$(mktemp -d)
             git clone -q --depth 1 "$REMOTE" "$TMP0" 2>/dev/null || true
             if [ -f "$TMP0/dash.png" ] && [ -f "$TMP0/device.conf" ]; then
-              OLD=$(cat "$TMP0/dash.png" "$TMP0/device.conf" | sha256sum | cut -d' ' -f1)
+              OLD=$(sig "$TMP0/dash.png" "$TMP0/device.conf" | sha256sum | cut -d' ' -f1)
             fi
           fi
           if [ "$NEW" = "$OLD" ]; then

@@ -540,30 +540,38 @@ def draw_footer(draw, fonts, cfg, now, hitmap):
     mx = lay["margin_x"]
     top = lay["footer_top"]
 
-    f = fonts.get(13)
     # 科目和教师名在页脚标一次即可 —— 教师视角下科目基本固定，
     # 在每个格子里重复它是浪费版面，班级才是要看的信息。
+    #
+    # 这里【刻意不画渲染时间戳】。画上去的话图片每次渲染都不一样，
+    # 「内容没变就不重绘」的判断会永远为真：设备每 15 分钟做一次
+    # 整屏刷新，输出仓库每 15 分钟多一个 commit —— 防抖动机制被
+    # 一个时间戳完全架空。
+    # 数据是否新鲜由设备端判断并显示（断了会标「离线 N 分钟」），
+    # 那也比「云端何时渲染」更贴近你真正关心的问题。
     sch = cfg["schedule"]
     tags = [t for t in (sch.get("subject_label"), sch.get("teacher_label")) if t]
-    left = "  ·  ".join(tags) if tags else ""
-    draw.text((mx, top + 4), left, font=fonts.get(14, bold=True), fill=BLACK)
-    draw.text((mx, top + 22), f"数据更新 {now:%m-%d %H:%M}", font=f, fill=GRAY_MID)
+    if tags:
+        draw.text((mx, top + 12), "  ·  ".join(tags),
+                  font=fonts.get(14, bold=True), fill=BLACK)
 
-    # 「返回主页」按钮。运行时 Kindle 界面被冻结，触摸全屏无反应，
-    # 只有点中这个矩形才会解冻退出 —— 所以它必须画得足够显眼且够大。
-    ex1, ey1, ex2, ey2 = lay["exit_rect"]
-    draw.rectangle([ex1, ey1, ex2, ey2], outline=BLACK, width=2)
-    f_exit = fonts.get(15, bold=True)
-    label = "← 返回主页"
-    tw = text_width(draw, label, f_exit)
-    draw.text((ex1 + (ex2 - ex1 - tw) // 2, ey1 + (ey2 - ey1 - 18) // 2),
-              label, font=f_exit, fill=BLACK)
-
+    # 底部按钮。界面被冻结后触摸全屏无反应，只有点中这些矩形才有动作，
+    # 所以它们必须画得足够显眼、够大、边界清楚。
     top_off = int(cfg["screen"].get("top_offset", 0))
-    hitmap["exit"] = {
-        "left": ex1, "top": ey1 + top_off,
-        "right": ex2, "bottom": ey2 + top_off,
-    }
+    f_btn = fonts.get(15, bold=True)
+
+    def button(key, label):
+        x1, y1, x2, y2 = lay[key]
+        draw.rectangle([x1, y1, x2, y2], outline=BLACK, width=2)
+        tw = text_width(draw, label, f_btn)
+        draw.text((x1 + (x2 - x1 - tw) // 2, y1 + (y2 - y1 - 18) // 2),
+                  label, font=f_btn, fill=BLACK)
+        return {"left": x1, "top": y1 + top_off, "right": x2, "bottom": y2 + top_off}
+
+    # 图标符号要挑字体里确实有的 —— ↻ 在 Noto Sans SC 里缺失，会画成方框。
+    # 「→」和「←」是基本箭头，覆盖率高得多。
+    hitmap["update"] = button("update_rect", "↓ 更新")
+    hitmap["exit"] = button("exit_rect", "← 返回")
 
     # 电量/离线提示区，由设备每分钟重绘 —— 冻结 cvm 后原生状态栏的电量
     # 也跟着凝固了，所以必须我们自己读 lipc 画。
@@ -571,9 +579,10 @@ def draw_footer(draw, fonts, cfg, now, hitmap):
     top_off = int(cfg["screen"].get("top_offset", 0))
     W = cfg["screen"]["width"]
     PH = cfg["screen"]["height"] + top_off
-    ex1 = lay["exit_rect"][0]
-    sx1, sy1 = 300, top + 6
-    sx2, sy2 = ex1 - 12, top + 30
+    # 右边界要避开「更新」按钮，否则电量文字会和按钮叠在一起
+    ux1 = lay["update_rect"][0]
+    sx1, sy1 = 262, top + 6
+    sx2, sy2 = ux1 - 10, top + 30
     hitmap["status"] = {
         "top": sy1 + top_off,
         "left": sx1,
@@ -634,11 +643,15 @@ def write_device_conf(out_dir: Path, hitmap: dict, cfg: dict, week: dict) -> Non
         "# 状态区（离线提示 / 电量）",
         *_rect_vars("STATUS", hitmap["status"]),
         "",
-        "# 返回主页按钮的命中矩形（屏幕坐标）。冻结界面后，只有点中它才解冻退出。",
+        "# 按钮命中矩形（屏幕坐标）。冻结界面后只有点中它们才有动作。",
         f"EXIT_X1={hitmap['exit']['left']}",
         f"EXIT_Y1={hitmap['exit']['top']}",
         f"EXIT_X2={hitmap['exit']['right']}",
         f"EXIT_Y2={hitmap['exit']['bottom']}",
+        f"UPD_X1={hitmap['update']['left']}",
+        f"UPD_Y1={hitmap['update']['top']}",
+        f"UPD_X2={hitmap['update']['right']}",
+        f"UPD_Y2={hitmap['update']['bottom']}",
         "",
         "# 设备端要绘制的文案。与字体子集同源生成 —— 设备只有子集字体，",
         "# 画不了子集之外的字，所以文案绝不能写死在 shell 里。",
@@ -687,6 +700,14 @@ DEVICE_MESSAGES = {
     "MSG_MINUTES": "分钟",
     "MSG_BATTERY": "电量",
     "MSG_WAIT_USB": "已连接电脑",
+    # 手动更新的各阶段提示。整个过程约一分钟，不给反馈的话
+    # 用户会以为按钮没反应而反复点击。
+    "MSG_UPD_START": "正在请求云端渲染",
+    "MSG_UPD_WAIT": "等待新数据",
+    "MSG_UPD_OK": "已更新",
+    "MSG_UPD_NOCHANGE": "已是最新",
+    "MSG_UPD_FAIL": "更新失败",
+    "MSG_UPD_TIMEOUT": "更新超时，稍后自动重试",
 }
 
 # 除文案外还需要的字符：数字、标点、以及完整的拉丁字母

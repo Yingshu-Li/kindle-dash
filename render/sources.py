@@ -220,10 +220,14 @@ def next_class(cfg: dict, today_courses: list[Course], now: datetime):
         if c.cancelled:
             continue                         # 停掉的课不该提示「当前/下一节」
         p = by_no.get(c.first)
-        if not p:
+        p_end = by_no.get(max(c.periods))
+        # 两端都要查在 —— 数据里若写了「1,9」而第 9 节根本不存在，
+        # 直接下标访问会 KeyError 让整次渲染崩掉，屏幕就永远停在旧图上。
+        # 宁可跳过这一节，也不能让一行脏数据打掉整张图。
+        if not p or not p_end:
             continue
         start = _hhmm_to_minutes(p["start"])
-        end = _hhmm_to_minutes(by_no[max(c.periods)]["end"])
+        end = _hhmm_to_minutes(p_end["end"])
         if start <= now_min < end:
             return p, c                      # 正在上课，直接返回
         if start >= now_min and start - now_min <= lookahead:
