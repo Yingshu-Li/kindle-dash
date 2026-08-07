@@ -87,25 +87,31 @@ jobs:
           # 同理，渲染出的图里也刻意不含任何时间戳。
           sig() { cat "$1"; grep -v '^GENERATED_AT=' "$2"; }
           NEW=$(sig out/dash.png out/device.conf | sha256sum | cut -d' ' -f1)
+          SRC=$PWD
           OLD=none
-          if git ls-remote --exit-code "$REMOTE" main >/dev/null 2>&1; then
-            TMP0=$(mktemp -d)
-            if git clone -q --depth 1 "$REMOTE" "$TMP0" 2>/dev/null; then
-              echo "已取回远端产物用于比对"
-              if [ -f "$TMP0/dash.png" ] && [ -f "$TMP0/device.conf" ]; then
-                OLD=$(sig "$TMP0/dash.png" "$TMP0/device.conf" | sha256sum | cut -d' ' -f1)
-                # 分别比对，便于定位到底是图变了还是配置变了
-                echo "  图  新=$(sha256sum out/dash.png | cut -c1-12) 旧=$(sha256sum "$TMP0/dash.png" | cut -c1-12)"
-                echo "  配置 新=$(grep -v '^GENERATED_AT=' out/device.conf | sha256sum | cut -c1-12) 旧=$(grep -v '^GENERATED_AT=' "$TMP0/device.conf" | sha256sum | cut -c1-12)"
-              else
-                echo "远端缺少 dash.png / device.conf，视为首次推送"
-              fi
+
+          # 比对必须在 checkout 目录【之外】进行。
+          #
+          # actions/checkout 会往本仓库的 git 配置里注入
+          # http.https://github.com/.extraheader，内容是它自己 GITHUB_TOKEN 的
+          # Authorization 头。在 checkout 目录里执行 git 时，这个 header 会
+          # 覆盖 URL 里带的凭据 —— 而 GITHUB_TOKEN 对输出仓库没有任何权限，
+          # 于是鉴权失败被报成「分支不存在」，比对逻辑永远走不到。
+          # （后面的 push 之所以正常，正是因为它已经 cd 到了临时目录。）
+          TMP0=$(mktemp -d)
+          cd "$TMP0"
+          if git clone -q --depth 1 "$REMOTE" prev 2>/dev/null; then
+            if [ -f prev/dash.png ] && [ -f prev/device.conf ]; then
+              OLD=$(sig prev/dash.png prev/device.conf | sha256sum | cut -d' ' -f1)
+              echo "  图   新=$(sha256sum "$SRC/out/dash.png" | cut -c1-12) 旧=$(sha256sum prev/dash.png | cut -c1-12)"
+              echo "  配置 新=$(grep -v '^GENERATED_AT=' "$SRC/out/device.conf" | sha256sum | cut -c1-12) 旧=$(grep -v '^GENERATED_AT=' prev/device.conf | sha256sum | cut -c1-12)"
             else
-              echo "clone 失败，无法比对，按有变化处理"
+              echo "远端缺少产物文件，视为首次推送"
             fi
           else
-            echo "远端 main 分支不存在，首次推送"
+            echo "远端仓库为空或无法取回，视为首次推送"
           fi
+          cd "$SRC"
           echo "签名  新=${NEW:0:16}  旧=${OLD:0:16}"
           if [ "$NEW" = "$OLD" ]; then
             echo "内容未变，跳过推送"
