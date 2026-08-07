@@ -267,8 +267,19 @@ class Lark:
     def records(self, app_token: str, table_id: str,
                 page_size: int = 200) -> list[dict]:
         """列出一张表的全部记录，自动翻页。返回每行的 fields 字典（含 record_id）。"""
-        if not app_token or not table_id:
-            return []
+        # 缺参数时必须抛错，不能返回空列表。
+        #
+        # 早先这里 return []，结果 LARK_APP_TOKEN 没传进来时整条链路一路安静：
+        # 三张表全读成空 → 渲染出一张没有课、没有待办的白板 → 校验通过 →
+        # 部署到设备。屏幕上是「本周没课」，而不是任何形式的报错。
+        # 数据源读不到就该让渲染失败，保住设备上那份旧的正确数据。
+        if not app_token:
+            raise LarkError(
+                "缺少 app_token。请设置环境变量 LARK_APP_TOKEN，"
+                "或在 data/config.yaml 的 lark.app_token 里填写。"
+            )
+        if not table_id:
+            raise LarkError("缺少 table_id，检查 config.yaml 的 lark.tables")
 
         url = self.base + RECORDS_PATH.format(app_token=app_token, table_id=table_id)
         headers = {"Authorization": f"Bearer {self.token()}"}

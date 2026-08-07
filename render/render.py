@@ -201,19 +201,15 @@ def draw_header(draw, fonts, cfg, now, weather, hitmap,
                 "width": sx2 - sx1, "height": sy2 - sy1},
     }
 
-    right_x = cx2 + 14
+    right_x = cx2 + 16
     names = cfg["locale"]["weekday_names"]
     weekday = names[now.isoweekday() - 1]
 
-    # 字号 22 而不是 24：右侧要给电量区留出空间，不能顶到它
-    f_date = fonts.get(22, bold=True)
-    f_sub = fonts.get(15)
-    f_next = fonts.get(15, bold=True)
+    f_date = fonts.get(24, bold=True)
+    f_sub = fonts.get(16)
 
-    y = cy1
-    draw.text((right_x, y), f"{now.month}月{now.day}日 {weekday}",
+    draw.text((right_x, cy1 + 2), f"{now.month}月{now.day}日 {weekday}",
               font=f_date, fill=BLACK)
-    y += 30
 
     if weather.ok:
         parts = [f"{weather.location} {weather.description}"]
@@ -221,27 +217,41 @@ def draw_header(draw, fonts, cfg, now, weather, hitmap,
             parts.append(f"{round(weather.temp_max)}°/{round(weather.temp_min)}°")
         if weather.precip_prob:
             parts.append(f"降水{weather.precip_prob}%")
-        draw.text((right_x, y), "  ".join(parts), font=f_sub, fill=GRAY_DARK)
+        line = "  ".join(parts)
     else:
-        draw.text((right_x, y), "天气获取失败", font=f_sub, fill=GRAY_MID)
-    y += 24
+        line = "天气获取失败"
+    draw.text((right_x, cy1 + 38), ellipsize(draw, line, f_sub, 600 - mx - right_x),
+              font=f_sub, fill=GRAY_DARK)
 
-    # 「当前/下一节课」区域留白，由设备每分钟重算重绘 ——
-    # 这行依赖当前时刻，凝固在图里的话大半节课都是错的。
-    # 这里只登记几何量，绘制逻辑在设备端。
+    draw.line([(mx, lay["header_height"]), (600 - mx, lay["header_height"])],
+              fill=BLACK, width=2)
+
+    # 「当前/下一节课」横贯全宽的带子，留白交给设备实时绘制。
+    # 从右上角一小行提升成独立一条 —— 它是整屏最该被一眼看到的信息，
+    # 挤在天气下面 17px 太小了。
     nx1, ny1, nx2, ny2 = lay["next_rect"]
     hitmap["next"] = {
         "top": ny1 + top_off,
         "left": nx1,
         "right": W - nx2,
         "bottom": PH - (ny2 + top_off),
-        "px": 17,
+        "px": 24,
         "cls": {"top": ny1 + top_off, "left": nx1,
                 "width": nx2 - nx1, "height": ny2 - ny1},
     }
 
-    draw.line([(mx, lay["header_height"]), (600 - mx, lay["header_height"])],
-              fill=BLACK, width=2)
+    # 同步状态区，左下。与电量分开两块 —— 早先共用一块，
+    # 手动更新的进度提示一出现就把电量覆盖没了。
+    qx1, qy1, qx2, qy2 = lay["sync_rect"]
+    hitmap["sync"] = {
+        "top": qy1 + top_off,
+        "left": qx1,
+        "right": W - qx2,
+        "bottom": PH - (qy2 + top_off),
+        "px": 16,
+        "cls": {"top": qy1 + top_off, "left": qx1,
+                "width": qx2 - qx1, "height": qy2 - qy1},
+    }
 
 
 def wrap_text(draw, s: str, font, max_w: int, max_lines: int) -> list[str]:
@@ -292,13 +302,14 @@ def draw_week_grid(draw, fonts, cfg, week, today_wd, cur_period, today) -> int:
     body_top = top + head_h
     bottom = body_top + row_h * len(periods)
 
-    f_head = fonts.get(15, bold=True)
-    # 节次列要在 40px 行高里塞下「号码 + 起止两行」，字号必须收紧，
-    # 否则最后一行的结束时间会被网格底线切掉
-    f_no = fonts.get(13, bold=True)
-    f_time = fonts.get(9)
+    f_head = fonts.get(16, bold=True)
+    # 节次列以前挤了「号码 + 起止两行」，三行塞进 40px 只能把时间压到 9px，
+    # 小到看不清。改成只留开始时间并放大到 12px —— 结束时间对「现在这节」
+    # 才有意义，那条信息由设备在顶部的当前课带子里实时给出，更醒目。
+    f_no = fonts.get(15, bold=True)
+    f_time = fonts.get(12)
     # 格子里显示班级（教师视角最需要的信息）。班级名都很短（如「四6班」），
-    # 所以字号可以给得很大 —— 一眼就能看清该去哪个班。
+    # 22px 已经足够一眼看清该去哪个班，不再加大。
     f_name_big = fonts.get(22, bold=True)
     f_name_sm = fonts.get(18, bold=True)
     f_room = fonts.get(11)
@@ -313,7 +324,7 @@ def draw_week_grid(draw, fonts, cfg, week, today_wd, cur_period, today) -> int:
     # ---- 星期表头：星期几 + 当天日期 ----
     # 加日期是为了让「本周」有明确的锚点 —— 只写星期几的话，
     # 看到「周五停课」你还得回头算一下那是几号。
-    f_date = fonts.get(11)
+    f_date = fonts.get(14)
     monday = today - timedelta(days=today.isoweekday() - 1)
     for j, wd in enumerate(weekdays):
         x = grid_x + j * col_w
@@ -324,26 +335,23 @@ def draw_week_grid(draw, fonts, cfg, week, today_wd, cur_period, today) -> int:
 
         label = names[wd - 1]
         tw = text_width(draw, label, f_head)
-        draw.text((x + (col_w - tw) // 2, top + 2), label, font=f_head, fill=fg)
+        draw.text((x + (col_w - tw) // 2, top + 1), label, font=f_head, fill=fg)
 
         d = monday + timedelta(days=wd - 1)
         dlabel = f"{d.month}/{d.day}"
         tw = text_width(draw, dlabel, f_date)
-        draw.text((x + (col_w - tw) // 2, top + 21), dlabel, font=f_date,
+        draw.text((x + (col_w - tw) // 2, top + 22), dlabel, font=f_date,
                   fill=fg if is_today else GRAY_DARK)
 
-    # ---- 节次标签列：节次号 + 起止时间 ----
-    # 教师需要知道这节课几点下课，所以起止都显示。
-    # 列宽为此从 38 加到 50 —— 38px 下第二行会被网格底线切掉。
+    # ---- 节次标签列：节次号 + 开始时间 ----
     for i, p in enumerate(periods):
         y = body_top + i * row_h
         no = str(p["idx"])
         tw = text_width(draw, no, f_no)
         draw.text((mx + (label_w - tw) // 2 - 2, y + 1), no, font=f_no, fill=BLACK)
-        for k, t in enumerate((p["start"], p["end"])):
-            tw = text_width(draw, t, f_time)
-            draw.text((mx + (label_w - tw) // 2 - 2, y + 16 + k * 11), t,
-                      font=f_time, fill=GRAY_DARK)
+        tw = text_width(draw, p["start"], f_time)
+        draw.text((mx + (label_w - tw) // 2 - 2, y + 21), p["start"],
+                  font=f_time, fill=GRAY_DARK)
 
     # ---- 网格线 ----
     # 横线：白天与晚上之间那条画粗，作为分组界线
@@ -501,7 +509,7 @@ def draw_todos(draw, fonts, cfg, todos, today, hitmap, top):
         draw.text((mx, items_top + 16), "没有待办事项", font=fonts.get(20), fill=GRAY_MID)
         return
 
-    row_h = 27
+    row_h = 30
     capacity = max((bottom - items_top) // row_h, 1)
     max_items = min(cfg["todo"]["max_items"], capacity)
     # 放不下时「还有 N 条」要占一行，不预留的话它会压到页脚上
@@ -509,46 +517,45 @@ def draw_todos(draw, fonts, cfg, todos, today, hitmap, top):
         max_items -= 1
     shown = todos[:max_items]
 
-    f_item = fonts.get(18)
-    f_item_b = fonts.get(18, bold=True)
-    f_due = fonts.get(13)
+    f_item = fonts.get(19)
+    f_item_b = fonts.get(19, bold=True)
+    f_due = fonts.get(14)
 
-    for i, t in enumerate(todos[:max_items]):
+    for i, t in enumerate(shown):
         y = items_top + i * row_h
 
         # 复选框
-        box = [mx, y + 4, mx + 15, y + 19]
-        draw.rectangle(box, outline=BLACK, width=2)
+        draw.rectangle([mx, y + 5, mx + 16, y + 21], outline=BLACK, width=2)
 
-        # 截止日徽标靠右
+        # 截止日徽标靠右：日期 + 还剩几天，两个都给。
+        # 只给日期要心算还剩多久，只给「12天后」又对不上日历，
+        # 两者各自解决对方的问题，合起来才是一眼就够的信息。
         due_w = 0
         if t.due:
             days = (t.due - today).days
-            # 近的用相对说法（更直觉），远的直接给日期 ——
-            # 「12天」要心算才知道是哪天，「8/19」一眼就能对上日历
+            date_s = f"{t.due.month}/{t.due.day}"
             if days < 0:
-                label = "已逾期"
+                rel = f"逾期{-days}天"
             elif days == 0:
-                label = "今天"
+                rel = "今天"
             elif days == 1:
-                label = "明天"
-            elif days <= 6:
-                label = f"{days}天后"
+                rel = "明天"
             else:
-                label = f"{t.due.month}/{t.due.day}"
-            due_w = text_width(draw, label, f_due) + 10
-            overdue = days <= 0
+                rel = f"{days}天后"
+            label = f"{date_s} {rel}"
+            due_w = text_width(draw, label, f_due) + 12
+            urgent = days <= 0
             bx1 = 600 - mx - due_w
-            draw.rectangle([bx1, y + 4, 600 - mx, y + 20],
-                           fill=BLACK if overdue else None,
+            draw.rectangle([bx1, y + 4, 600 - mx, y + 24],
+                           fill=BLACK if urgent else None,
                            outline=BLACK, width=1)
-            draw.text((bx1 + 5, y + 5), label, font=f_due,
-                      fill=WHITE if overdue else BLACK)
+            draw.text((bx1 + 6, y + 6), label, font=f_due,
+                      fill=WHITE if urgent else BLACK)
 
-        tx = mx + 24
-        avail = 600 - mx - tx - (due_w + 8 if due_w else 0)
+        tx = mx + 26
+        avail = 600 - mx - tx - (due_w + 10 if due_w else 0)
         font = f_item_b if t.priority else f_item
-        draw.text((tx, y + 2), ellipsize(draw, t.title, font, avail),
+        draw.text((tx, y + 3), ellipsize(draw, t.title, font, avail),
                   font=font, fill=BLACK)
 
         # 整行都是热区，方便手指点，不只限于复选框
@@ -560,26 +567,29 @@ def draw_todos(draw, fonts, cfg, todos, today, hitmap, top):
 
     if len(todos) > max_items:
         y = items_top + len(shown) * row_h
-        draw.text((mx + 24, y + 2), f"还有 {len(todos) - max_items} 条",
+        draw.text((mx + 26, y + 3), f"还有 {len(todos) - max_items} 条",
                   font=f_due, fill=GRAY_MID)
 
 
 def draw_footer(draw, fonts, cfg, now, hitmap):
     lay = cfg["layout"]
     mx = lay["margin_x"]
-    top = lay["footer_top"]
 
-    # 页脚只放按钮。
+    # 页脚左半边留白给设备写同步状态（见 draw_header 里登记的 sync 区），
+    # 右半边放两个按钮。
     #
     # 科目和教师名去掉了 —— 这是你自己的课表，不需要每天提醒你教什么、你是谁。
     # 渲染时间戳也刻意不画：画上去的话图片每次渲染都不一样，
     # 「内容没变就不重绘」会永远为真，设备每个周期都做一次无谓的整屏刷新。
-    # 数据是否新鲜由设备判断 —— 断了会在右上角标「离线 N 分钟」。
+    # 数据新鲜度由设备在左下角实时写，那里的时间是设备自己的时钟。
     #
     # 底部按钮：界面被冻结后触摸全屏无反应，只有点中这些矩形才有动作，
     # 所以它们必须画得足够显眼、够大、边界清楚。
     top_off = int(cfg["screen"].get("top_offset", 0))
     f_btn = fonts.get(15, bold=True)
+
+    draw.line([(mx, lay["footer_top"] - 8), (600 - mx, lay["footer_top"] - 8)],
+              fill=GRAY_MID, width=1)
 
     def button(key, label):
         x1, y1, x2, y2 = lay[key]
@@ -593,7 +603,7 @@ def draw_footer(draw, fonts, cfg, now, hitmap):
     # 「→」和「←」是基本箭头，覆盖率高得多。
     hitmap["update"] = button("update_rect", "↓ 更新")
     hitmap["exit"] = button("exit_rect", "← 返回")
-    # 电量/离线提示已移到右上角，在 draw_header 里登记坐标
+    # 电量在右上角、同步状态在左下角，两块坐标都在 draw_header 里登记
 
 
 # ---------------------------------------------------------------- 下发给设备
@@ -642,8 +652,11 @@ def write_device_conf(out_dir: Path, hitmap: dict, cfg: dict, week: dict) -> Non
         "# 当前/下一节课（设备每分钟重算）",
         *_rect_vars("NEXT", hitmap["next"]),
         "",
-        "# 状态区（离线提示 / 电量）",
+        "# 状态区（右上角，只画电量）",
         *_rect_vars("STATUS", hitmap["status"]),
+        "",
+        "# 同步区（左下角，画数据时间 / 离线提示 / 手动更新进度）",
+        *_rect_vars("SYNC", hitmap["sync"]),
         "",
         "# 按钮命中矩形（屏幕坐标）。冻结界面后只有点中它们才有动作。",
         f"EXIT_X1={hitmap['exit']['left']}",
@@ -702,6 +715,13 @@ DEVICE_MESSAGES = {
     "MSG_MINUTES": "分钟",
     "MSG_BATTERY": "电量",
     "MSG_WAIT_USB": "已连接电脑",
+    # 左下角同步区：「数据 15:04」＝ 屏上内容是那一刻从云端取到的。
+    # 这个时间只有设备知道 —— 画进图里的话每次渲染都不同，
+    # 「内容没变就不重绘」会永远失效。
+    "MSG_DATA": "数据",
+    "MSG_NEVER": "尚未同步",
+    # 当前课的下课时间：「当前 二3班 · 至 15:50」
+    "MSG_UNTIL": "至",
     # 手动更新的各阶段提示。整个过程约一分钟，不给反馈的话
     # 用户会以为按钮没反应而反复点击。
     "MSG_UPD_START": "正在请求云端渲染",
@@ -716,7 +736,9 @@ DEVICE_MESSAGES = {
 #（日志、调试信息、以及任何英文提示都可能用到，Latin 字形很小，全带上不亏）
 DEVICE_FIXED_CHARS = (
     "0123456789"
-    ":.,-/%()[]<>+= "
+    # · 是同步区的分隔符。子集里漏掉任何一个设备要画的字符都会变成方框，
+    # 而方框在墨水屏上又特别显眼 —— 「rebooting ...」缺拉丁字母那次就是这样。
+    ":.,-/%()[]<>+=· "
     "abcdefghijklmnopqrstuvwxyz"
     "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
 )
@@ -838,6 +860,8 @@ def main():
     ap.add_argument("--at", help='模拟时刻，格式 "YYYY-MM-DD HH:MM"')
     ap.add_argument("--preview-clock", action="store_true",
                     help="在时钟区域画占位时间，仅本地看构图用，CI 不要开")
+    ap.add_argument("--allow-empty", action="store_true",
+                    help="允许周课表为空（默认会中止，防止把白板推到设备上）")
     args = ap.parse_args()
 
     cfg = sources.load_yaml(str(REPO_ROOT / "data" / "config.yaml"))
@@ -877,6 +901,20 @@ def main():
     img, hitmap, fonts, week = build(
         cfg, schedule_cfg, overrides_cfg, now, todos, weather, args.preview_clock
     )
+
+    # 一整周一节课都没有 = 数据没读进来，不是真实状态。
+    # 固定的周课表不会是空的，读空只可能是凭据缺失、表被清空、列名改了。
+    # 这种时候宁可让渲染失败 —— 设备上会继续显示上一份正确的数据，
+    # 而不是被一张「本周没有课」的白板覆盖掉。
+    if provider == "lark" and not args.allow_empty:
+        total = sum(len(cs) for cs in week.values())
+        if total == 0:
+            raise SystemExit(
+                "中止：从 Lark 读到的周课表是空的。\n"
+                "  常见原因：LARK_APP_TOKEN 未设置、应用未被授权到该 Base、"
+                "课程表被清空、或列名与 config.yaml 的 lark.fields 对不上。\n"
+                "  确认确实就该是空的，加 --allow-empty 跳过本检查。"
+            )
 
     out_dir = Path(args.out)
     out_dir.mkdir(parents=True, exist_ok=True)
