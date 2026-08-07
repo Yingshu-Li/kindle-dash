@@ -750,7 +750,9 @@ def build_device_font(out_dir: Path, cfg: dict, week: dict) -> None:
         print(f"警告: 找不到可变字体 {src}，跳过设备字体生成")
         return
 
-    font = TTFont(str(src))
+    # recalcTimestamp=False 是关键：默认值 True 会在 save() 时把 head.modified
+    # 重写成当前时间，把下面手工清零的动作直接覆盖掉，产物于是永不可复现。
+    font = TTFont(str(src), recalcTimestamp=False)
     # 必须先固化字重 —— fbink 不会去设置可变字体的字重轴，
     # 直接用会落到默认的 100(Thin)，大字号下细得看不清
     weight = int((cfg.get("fonts") or {}).get("weight_bold", 700))
@@ -763,6 +765,17 @@ def build_device_font(out_dir: Path, cfg: dict, week: dict) -> None:
     sub = subset.Subsetter(options=opts)
     sub.populate(text=charset)
     sub.subset(font)
+
+    # 抹掉 head 表里的时间戳，让产物字节级可复现。
+    #
+    # 不这么做的话，字形完全相同的两次生成也会因为 modified 时间不同而
+    # 字节不同 —— FONT_SHA 随之改变，于是：CI 每次都判定「内容有变化」并
+    # 推一个新 commit，设备每个同步周期都重新下载 60 KB 字体并整屏重绘。
+    # CI 是全新 checkout，字符集缓存永远命中不了，所以每次必然重新生成。
+    head = font["head"]
+    head.created = 0
+    head.modified = 0
+
     font.save(str(dst))
 
     stamp.write_text(charset, encoding="utf-8")
